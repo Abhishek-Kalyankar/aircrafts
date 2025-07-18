@@ -28,7 +28,7 @@ def get_db_connection():
         database=os.environ.get("DB_NAME", "aircraft_db"),
         user=os.environ.get("DB_USER", "postgres"),
         password=os.environ.get("DB_PASSWORD", "Riti@2901"),
-        host=db_host,
+       # host=db_host,
         port=5432
     )
 
