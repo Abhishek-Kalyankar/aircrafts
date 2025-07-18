@@ -74,7 +74,7 @@ def save_aircrafts_to_db(aircrafts):
         cur = conn.cursor()
         for ac in aircrafts:
             cur.execute("""
-                INSERT INTO aircrafts (
+                INSERT INTO aircraft_data (
                     icao24, callsign, origin_country, time_position,
                     last_contact, longitude, latitude, baro_altitude,
                     on_ground, velocity, true_track, vertical_rate,
@@ -107,7 +107,7 @@ def get_aircrafts():
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM aircrafts ORDER BY retrieved_at DESC LIMIT 100")
+        cur.execute("SELECT * FROM aircraft_data ORDER BY retrieved_at DESC LIMIT 100")
         rows = cur.fetchall()
         cur.close()
         conn.close()
