@@ -1,4 +1,5 @@
 from flask import Flask, jsonify
+from flask_cors import CORS
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -6,6 +7,7 @@ from datetime import datetime, timezone
 import logging
 import threading
 import time
+import os
 
 # --- Config ---
 API_URL = "https://opensky-network.org/api/states/all"
@@ -14,15 +16,16 @@ MIN_LON, MAX_LON = 68.0, 97.0
 
 # --- App Setup ---
 app = Flask(__name__)
+CORS(app)  # Optional: allow frontend access
 logging.basicConfig(level=logging.INFO)
 
 # --- DB Connection ---
 def get_db_connection():
     return psycopg2.connect(
-        host="localhost",
-        database="aircraft_db",
-        user="postgres",
-        password="Riti@2901"
+        host=os.environ.get("DB_HOST", "localhost"),
+        database=os.environ.get("DB_NAME", "aircraft_db"),
+        user=os.environ.get("DB_USER", "postgres"),
+        password=os.environ.get("DB_PASSWORD", "Riti@2901")
     )
 
 # --- Fetch OpenSky Data ---
@@ -53,97 +56,96 @@ def filter_indian_aircraft(states):
 
 # --- Insert Aircraft Data ---
 def insert_aircraft_data(aircraft_list):
-    conn = get_db_connection()
-    conn.autocommit = True
-    cursor = conn.cursor()
-    for s in aircraft_list:
-        try:
-            data = (
-                s[0],  # icao24
-                s[1],  # callsign
-                s[2],  # origin_country
-                s[3],  # time_position
-                s[4],  # last_contact
-                s[5],  # longitude
-                s[6],  # latitude
-                s[7],  # baro_altitude
-                s[8],  # on_ground
-                s[9],  # velocity
-                s[10], # true_track
-                s[11], # vertical_rate
-                s[13], # geo_altitude
-                s[14], # squawk
-                s[15], # spi
-                s[16], # position_source
-                datetime.now(timezone.utc)  # timestamp (timezone aware)
-            )
-            cursor.execute("""
-                INSERT INTO aircraft_data (
-                    icao24, callsign, origin_country, time_position,
-                    last_contact, longitude, latitude, baro_altitude,
-                    on_ground, velocity, true_track, vertical_rate,
-                    geo_altitude, squawk, spi, position_source, timestamp
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, data)
-        except Exception as e:
-            logging.error(f"DB insert failed for {s[0]}: {e}")
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        conn.autocommit = True
+        cursor = conn.cursor()
+        for s in aircraft_list:
+            try:
+                data = (
+                    s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7],
+                    s[8], s[9], s[10], s[11], s[13], s[14], s[15], s[16],
+                    datetime.now(timezone.utc)
+                )
+                cursor.execute("""
+                    INSERT INTO aircraft_data (
+                        icao24, callsign, origin_country, time_position,
+                        last_contact, longitude, latitude, baro_altitude,
+                        on_ground, velocity, true_track, vertical_rate,
+                        geo_altitude, squawk, spi, position_source, timestamp
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, data)
+            except Exception as e:
+                logging.error(f"DB insert failed for {s[0]}: {e}")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        logging.error(f"DB connection or insert error: {e}")
 
 # --- Fallback from DB ---
 def fallback_from_db():
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
-    cursor.execute("SELECT * FROM aircraft_data ORDER BY timestamp DESC LIMIT 20")
-    data = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return data
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT * FROM aircraft_data ORDER BY timestamp DESC LIMIT 20")
+        data = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return data
+    except Exception as e:
+        logging.error(f"DB Fallback Error: {e}")
+        return []
 
 # --- Background data collector ---
 def background_data_collector():
     while True:
-        states = fetch_opensky_data()
-        if states:
-            filtered = filter_indian_aircraft(states)
-            insert_aircraft_data(filtered)
-            logging.info(f"Inserted {len(filtered)} aircraft records at {datetime.now(timezone.utc)}")
-        else:
-            logging.warning("No states fetched in background collector")
-        time.sleep(10)  # collect every 10 seconds
+        try:
+            states = fetch_opensky_data()
+            if states:
+                filtered = filter_indian_aircraft(states)
+                insert_aircraft_data(filtered)
+                logging.info(f"Inserted {len(filtered)} aircraft records at {datetime.now(timezone.utc)}")
+            else:
+                logging.warning("No states fetched in background collector")
+        except Exception as e:
+            logging.error(f"Background thread error: {e}")
+        time.sleep(10)
 
 # --- Routes ---
 @app.route("/aircrafts", methods=["GET"])
 def get_aircrafts():
-    states = fetch_opensky_data()
-    if states:
-        filtered = filter_indian_aircraft(states)
-        # Optionally, you can remove insertion here since background thread already inserts
-        data = [
-            {
-                "icao24": s[0],
-                "callsign": s[1],
-                "origin_country": s[2],
-                "time_position": s[3],
-                "last_contact": s[4],
-                "longitude": s[5],
-                "latitude": s[6],
-                "baro_altitude": s[7],
-                "on_ground": s[8],
-                "velocity": s[9],
-                "true_track": s[10],
-                "vertical_rate": s[11],
-                "geo_altitude": s[13],
-                "squawk": s[14],
-                "spi": s[15],
-                "position_source": s[16],
-                "source": "opensky-live"
-            } for s in filtered
-        ]
-        return jsonify({"aircrafts": data, "count": len(data)})
-    else:
-        db_data = fallback_from_db()
-        return jsonify({"aircrafts": db_data, "count": len(db_data), "source": "db-fallback"})
+    try:
+        states = fetch_opensky_data()
+        if states:
+            filtered = filter_indian_aircraft(states)
+            data = [
+                {
+                    "icao24": s[0],
+                    "callsign": s[1],
+                    "origin_country": s[2],
+                    "time_position": s[3],
+                    "last_contact": s[4],
+                    "longitude": s[5],
+                    "latitude": s[6],
+                    "baro_altitude": s[7],
+                    "on_ground": s[8],
+                    "velocity": s[9],
+                    "true_track": s[10],
+                    "vertical_rate": s[11],
+                    "geo_altitude": s[13],
+                    "squawk": s[14],
+                    "spi": s[15],
+                    "position_source": s[16],
+                    "source": "opensky-live"
+                } for s in filtered
+            ]
+            return jsonify({"aircrafts": data, "count": len(data)})
+        else:
+            db_data = fallback_from_db()
+            return jsonify({"aircrafts": db_data, "count": len(db_data), "source": "db-fallback"})
+    except Exception as e:
+        logging.error(f"/aircrafts route error: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route("/")
 def home():
@@ -151,14 +153,8 @@ def home():
 
 # --- Run ---
 if __name__ == "__main__":
-    # Start background thread before Flask app runs
-    if __name__ == "__main__":
-    # Start background thread
     collector_thread = threading.Thread(target=background_data_collector, daemon=True)
     collector_thread.start()
 
-    # Use host/port compatible with Render
-    import os
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5000))  # Required by Render
     app.run(host="0.0.0.0", port=port, debug=True)
-
