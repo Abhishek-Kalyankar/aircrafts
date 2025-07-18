@@ -19,6 +19,8 @@ app = Flask(__name__)
 CORS(app)  # Optional: allow frontend access
 logging.basicConfig(level=logging.INFO)
 
+db_host = os.environ.get("DATABASE_HOST", "127.0.0.1")
+
 # --- DB Connection ---
 def get_db_connection():
     return psycopg2.connect(
@@ -26,6 +28,8 @@ def get_db_connection():
         database=os.environ.get("DB_NAME", "aircraft_db"),
         user=os.environ.get("DB_USER", "postgres"),
         password=os.environ.get("DB_PASSWORD", "Riti@2901")
+        host=db_host,
+        port=5432
     )
 
 # --- Fetch OpenSky Data ---
