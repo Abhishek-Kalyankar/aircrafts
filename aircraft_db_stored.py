@@ -152,7 +152,13 @@ def home():
 # --- Run ---
 if __name__ == "__main__":
     # Start background thread before Flask app runs
+    if __name__ == "__main__":
+    # Start background thread
     collector_thread = threading.Thread(target=background_data_collector, daemon=True)
     collector_thread.start()
 
-    app.run(debug=True)
+    # Use host/port compatible with Render
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
+
